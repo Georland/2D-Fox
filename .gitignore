@@ -1,0 +1,12 @@
+.vs/
+.vsconfig
+2D Fox.sln
+Assembly-CSharp.csproj
+
+Library/
+Logs/
+Packages/
+
+Temp/
+UserSettings/
+obj/
