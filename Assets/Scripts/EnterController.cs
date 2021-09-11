@@ -38,8 +38,16 @@ public class EnterController : MonoBehaviour
     }
 
     void NextStage()
-    {        
-        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex + 1);
+    {
+        if (SceneManager.GetActiveScene().buildIndex + 1 <= 2)
+        {
+            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex + 1);
+        }
+        else
+        {
+            Application.Quit();
+            Debug.Log("Application closed");
+        }
 
         //for (int i = 0; i < Scenes.Length; i++)
         //{
