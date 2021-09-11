@@ -55,7 +55,8 @@ public class ShadowSprite : MonoBehaviour
         // 检测是否已经超时
         if (Time.time >= activeStart + activeTime)
         {
-            // 如果超过，则将对象放回对象池 
+            // 如果超过，则将对象放回对象池
+            ShadowPool.instance.ReturnPool(this.gameObject); // 这是Shadow Pool 的方法，由于shadow pool 是单例，且方法为public，所以可以直接调用，且大家全部共享
         }
     }
 }

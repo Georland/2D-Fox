@@ -13,10 +13,12 @@ public class PlayerController : MonoBehaviour
     public Transform ceiling;   // 下蹲时头顶的判断范围，如果有图层进入头顶则不允许继续crouch
     public LayerMask ground;    // 从外面导入可能碰撞的表面，此处将地面设置成其他层，并把该层全部导入进来
     public LayerMask ladder;    // 从外面导入可能碰撞的表面，此处将楼梯导入
-    public AudioSource jumpAudio; // 跳跃音效
-    public AudioSource hurtAudio; // 受伤音效    
-    public AudioSource deadAudio; // 死亡音效
+    //public AudioSource jumpAudio; // 跳跃音效
+    //public AudioSource hurtAudio; // 受伤音效    
+    //public AudioSource deadAudio; // 死亡音效
 
+    private float faceDirection;    // 伪面部朝向，为了方便各个函数使用方向，所以放在全局变量中
+    private float towards;          // 真面部朝向，利用localScale 确定朝向，即使速度为0 也能有值
     bool isAlive;               // 是否存活，与main camera 上面的音乐绑定，在死亡之后停止背景音乐
     public float speed;         // 水平方向的速度
     public float jumpHeight;    // 竖直方向的跳跃高度
@@ -42,6 +44,18 @@ public class PlayerController : MonoBehaviour
     bool isCrouching = false;   // 监测角色是否在下蹲
     readonly float ceilingRadius = 0.2f;  // 角色蹲下时，上方判定是否有物体的指示圆的半径大小
 
+    // Dash 逻辑所需变量
+    [Header("Dash参数")]
+    public float dashTime;      // dash 的持续时长
+    private float dashTimeLeft; // dash 剩余的时间，自己运算出来
+    public float dashSpeed;     // dash 时候的速度
+    private Vector2 velocityBeforeDash = new Vector2(0, 0); // dash 之前的速度，dash 之后需要还原回这个速度
+
+    // Dash cd逻辑所需变量
+    private float lastDash = -10f;     // 上一次dash 的时间点，此处有初值，是为了让游戏开始的时候一定能dash。因为float 有默认值0，所以按照dash 的条件判断，0 + cd > 刚开始的操作时间必然不成立。所以初始值改成-10
+    public float dashCoolDown;  // dash 的cd，可设置
+    private bool isDashing;      // 冲刺状态的判断
+
     // 受伤 逻辑所需变量
     bool isHurt;        // 判定是否受伤
     readonly float hurtHorizontal = -5f; // 受伤时水平方向往回弹起的高度
@@ -57,7 +71,7 @@ public class PlayerController : MonoBehaviour
         rb = this.GetComponent<Rigidbody2D>();
         ani = this.GetComponent<Animator>();
 
-        // 变量初始化
+        // 变量初始化        
         isAlive = true;
         jumpTime = maxJumpTime;
         isHurt = false;
@@ -80,21 +94,45 @@ public class PlayerController : MonoBehaviour
         {
             jumpUpdate = true;
         }
-        
+
+        // 冲锋逻辑
+        if (Input.GetKeyDown(KeyCode.LeftShift) && Time.time > lastDash + dashCoolDown)
+        {
+            Debug.Log("Ready to dash");
+            // 可以执行dash
+            ReadyToDash();
+        }
+
     }
 
     private void FixedUpdate()
     {
         // 下面的部分为 ： 完全由玩家主动控制，程序对操作进行反应的动作合集
+        faceDirection = Input.GetAxisRaw("Horizontal");
+        towards = transform.localScale.x;
+
         if (ani.GetBool("hurt")) // 在受伤的情况下，先执行受伤之后的强制位移，再禁用一段时间的其他动作，使得受伤位移和动画能顺利播完
         {
             return;
         }
 
-        Move();  // move 应该放到fixedUpdate 里面，因为需要确保稳定帧数调用move
+        if (!isCrouching && !onLadder) // 下蹲 or 在楼梯上时不能dash
+        {
+            Dash();     // dash 判定+执行
+        }
+        else
+        {
+            isDashing = false; // 如果有上述任意条件，把isDashing 关掉，让下面的isDashing 判断能够跳过，就可以执行Move 等函数了
+        }
 
-        // 蹲下判定
-        Crouch();
+        if (isDashing)
+        {
+            return; // 冲刺时 不进行move，jump, crouch 判断
+        }
+
+        Move();     // move 应该放到fixedUpdate 里面，因为需要确保稳定帧数调用move
+
+        Crouch();   // 蹲下 判定+执行
 
         //if (Input.GetButtonDown("Jump") && !isJumping)
         if (jumpUpdate) // 接住不定帧传过来的 是否按下 Jump 的判断，在固定帧调用相应动作，并且把 判断的布尔值 重置，以便下一次调用。
@@ -117,7 +155,7 @@ public class PlayerController : MonoBehaviour
     void Move()
     {
         float movement = Input.GetAxis("Horizontal"); // getAxis 能够取得-1 到 1 之间的任意float 数，可以获得渐变的过程，所以getAxis 可以用于接收手柄输入，获得精确的数据
-        float facedirection = Input.GetAxisRaw("Horizontal"); // getAxisRaw 只能接收 -1， 0， 1 三个数，但是正好符合pc端需要精确控制的要求，需要精确控制的2d游戏一般用Raw
+        // faceDirection = Input.GetAxisRaw("Horizontal"); // getAxisRaw 只能接收 -1， 0， 1 三个数，但是正好符合pc端需要精确控制的要求，需要精确控制的2d游戏一般用Raw
 
         if (Mathf.Abs(movement) > movingThreshold)
         {
@@ -129,9 +167,9 @@ public class PlayerController : MonoBehaviour
             ani.SetBool("run", false);
         }
 
-        if (facedirection != 0)
+        if (faceDirection != 0)
         {
-            this.transform.localScale = new Vector3(facedirection, 1, 1); // 即使是2d 的项目，transform 里的东西仍然是有三个坐标的。所以这里是new Vector3
+            this.transform.localScale = new Vector3(faceDirection, 1, 1); // 即使是2d 的项目，transform 里的东西仍然是有三个坐标的。所以这里是new Vector3
         }
 
 
@@ -155,8 +193,10 @@ public class PlayerController : MonoBehaviour
             isJumping = true;
             rb.velocity = new Vector2(rb.velocity.x, jumpHeight * Time.fixedDeltaTime);
             jumpTime--;
-            jumpAudio.Play();
-
+            //jumpAudio.Play();
+            SoundManager.instance.JumpAudio(); // soundManager 为单例，所以直接用单例做。
+                                               // 单例的好处是，各个地方都能方便地像调用写在自己文档里的变量一样调用该方法，而不用特意写很多东西去取这个变量，再调用
+                                               // 缺点是自己是静态static 的，所以会一直存放在内存里，占用内存空间
         }
     }
 
@@ -213,7 +253,7 @@ public class PlayerController : MonoBehaviour
     void Crouch()
     {
         if (!Physics2D.OverlapCircle(ceiling.position, ceilingRadius, ground)) // 如果头顶没有东西，才执行crouch 逻辑
-        {            
+        {
             Collider2D cd = this.GetComponent<BoxCollider2D>();
             if (Input.GetButton("Crouch") && !isJumping) // 在没跳的情况下按下了crouch
             {
@@ -235,7 +275,36 @@ public class PlayerController : MonoBehaviour
             rb.velocity = new Vector2(rb.velocity.x / crouchDecreaseRate, rb.velocity.y);
         }
     }
-    
+
+    void ReadyToDash()
+    {
+        // 顺发按键动作，在Update 里面调用。允许dash，设置dash 的各项变量值
+        isDashing = true;
+        dashTimeLeft = dashTime; // 倒计时开始
+        lastDash = Time.time; // 将此次dash 的时间点传给 lastDash
+        velocityBeforeDash = new Vector2(towards * speed * Time.fixedDeltaTime, 0); // 将此次dash 前的velocity 保存下来，以便后面恢复使用
+    }
+
+    void Dash()
+    {
+        // 接过Update 里面的判断，在FixedUpdate 里面执行的 dash 行为
+        if (isDashing)
+        {
+            if (dashTimeLeft > 0) // 还有时间剩余，可以继续冲锋
+            {
+                rb.velocity = new Vector2(dashSpeed * towards * Time.fixedDeltaTime, rb.velocity.y); // 冲锋速度设置
+                dashTimeLeft -= Time.fixedDeltaTime;
+                ShadowPool.instance.GetFromPool();
+            }
+            else
+            {
+                Debug.Log("stored velocity is " + velocityBeforeDash.x + " " + velocityBeforeDash.y);
+                rb.velocity = velocityBeforeDash;
+                isDashing = false; // isDashing 为false 之后，fixedUpdate 里面自动开启下面的move 判断，所以速度会恢复到正常状态
+            }
+        }
+    }
+
 
     // 动作变化监测
     void SwitchAnim()
@@ -314,7 +383,7 @@ public class PlayerController : MonoBehaviour
     //    }
     //    return false;
     //}
-     
+
     // 收集item / 掉落重置
     private void OnTriggerEnter2D(Collider2D collision)
     {
@@ -368,7 +437,8 @@ public class PlayerController : MonoBehaviour
                 float direction = this.transform.position.x < collision.gameObject.transform.position.x ? 1 : -1;
                 ani.SetBool("hurt", true);
                 rb.velocity = new Vector2(direction * hurtHorizontal, hurtVertical);
-                hurtAudio.Play();
+                //hurtAudio.Play();
+                SoundManager.instance.HurtAudio();
             }
         }
 
@@ -376,7 +446,8 @@ public class PlayerController : MonoBehaviour
         if (collision.gameObject.CompareTag("deadline"))
         {
             isAlive = false;  // 让main camera 停止背景音乐
-            deadAudio.Play(); // 播放死亡音效
+            //deadAudio.Play(); // 播放死亡音效
+            SoundManager.instance.DeadAudio();
             this.GetComponent<BoxCollider2D>().enabled = false; // 避免两次触发trigger 导致播放两次声音
             Invoke("Restart", 2.5f); // 延时复活
         }
